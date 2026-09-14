@@ -1,0 +1,21 @@
+# Blueprint de Render · https://render.com/docs/blueprint-spec
+# Configuración para el plan gratuito: sin disco, con Postgres externo.
+services:
+  - type: web
+    name: gonzalez-inmuebles
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_USER
+        value: admin
+      - key: APP_PASSWORD
+        sync: false        # se carga a mano en el panel de Render
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false        # cadena de conexión de Postgres (Neon, Supabase o Render)
