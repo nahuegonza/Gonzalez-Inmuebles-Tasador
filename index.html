@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>González Inmuebles · Tasaciones</title>
+<meta name="description" content="Generador de tasaciones y presentaciones comerciales de González Inmuebles.">
+<link rel="icon" href="/img/logo-iso.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Playfair+Display:ital,wght@0,500;0,600;0,700;0,800;1,500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/estilos-app.css">
+<link rel="stylesheet" href="/estilos-doc.css">
+</head>
+<body x-data="app()" x-cloak>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="ico-casa" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2.6 1.8 11.2h3v10.2h5.1v-6h4.2v6h5.1V11.2h3z"/></symbol>
+</svg>
+
+<!-- ============================================================
+     PANTALLA DE CARGA
+     ============================================================ -->
+<div class="cargando" x-show="pantalla === 'cargando'">Cargando…</div>
+
+<!-- ============================================================
+     LOGIN
+     ============================================================ -->
+<div class="login" x-show="pantalla === 'login'">
+  <form class="caja" @submit.prevent="entrar()">
+    <img src="/img/logo.jpg" alt="González Inmuebles">
+    <h1>Acceso al sistema</h1>
+    <p class="sub">Generador de tasaciones y presentaciones comerciales</p>
+
+    <div class="err" x-show="acceso.error" x-text="acceso.error"></div>
+
+    <div class="field">
+      <label for="u">Usuario</label>
+      <input id="u" type="text" x-model="acceso.usuario" autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label for="c">Contraseña</label>
+      <input id="c" type="password" x-model="acceso.clave" autocomplete="current-password" required>
+    </div>
+    <button class="btn btn-primario" type="submit" :disabled="acceso.enviando"
+            x-text="acceso.enviando ? 'Ingresando…' : 'Ingresar'"></button>
+  </form>
+</div>
+
+<!-- ============================================================
+     APLICACIÓN
+     ============================================================ -->
+<div class="shell" x-show="pantalla !== 'login' && pantalla !== 'cargando'">
+
+  <header class="topbar">
+    <button type="button" class="marca" @click="volverALista()">
+      <img src="/img/logo-iso.png" alt="">
+      <span>
+        <b>González Inmuebles</b>
+        <small>Tasaciones</small>
+      </span>
+    </button>
+
+    <div class="sep"></div>
+
+    <button type="button" class="btn btn-plano btn-sm" @click="pantalla = 'config'"
+            x-show="pantalla !== 'config'">Configuración</button>
+    <div class="usuario">
+      <i x-text="(usuario || 'A').charAt(0).toUpperCase()"></i>
+      <span x-text="usuario"></span>
+    </div>
+    <button type="button" class="btn btn-plano btn-sm" @click="salir()">Salir</button>
+  </header>
+
+  <!-- ---------- HISTÓRICO ---------- -->
+  <main class="contenido" x-show="pantalla === 'lista'">
+    <div class="encabezado">
+      <div>
+        <h1>Tasaciones</h1>
+        <p><span x-text="lista.length"></span> en el histórico</p>
+      </div>
+      <div class="acciones">
+        <button type="button" class="btn btn-linea" @click="nueva(true)">Nueva con ejemplo</button>
+        <button type="button" class="btn btn-primario" @click="nueva(false)">+ Nueva tasación</button>
+      </div>
+    </div>
+
+    <div class="buscador" x-show="lista.length">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input type="text" x-model="filtro" placeholder="Buscar por dirección o barrio…">
+    </div>
+
+    <div class="vacio" x-show="!lista.length">
+      <img src="/img/logo-iso.png" alt="">
+      <h3>Todavía no hay tasaciones</h3>
+      <p>Creá la primera y va a quedar guardada acá para consultarla cuando quieras.</p>
+      <button type="button" class="btn btn-primario" @click="nueva(false)">+ Nueva tasación</button>
+    </div>
+
+    <div class="lista" x-show="lista.length">
+      <template x-for="t in listaFiltrada" :key="t.id">
+        <div class="item">
+          <div>
+            <div class="dir">
+              <span x-text="t.direccion"></span>
+              <span class="pill" :class="t.estado" x-text="etiquetaEstado(t.estado)"></span>
+            </div>
+            <div class="meta">
+              <span x-text="t.zona"></span>
+              <span x-show="t.zona && t.tipo"> · </span>
+              <span x-text="t.tipo"></span>
+              <span> · actualizada el <span x-text="fecha(t.actualizada)"></span></span>
+            </div>
+          </div>
+          <div class="cifra">
+            <small>Objetivo de cierre</small>
+            <b x-text="usd(t.objetivo)"></b>
+          </div>
+          <div class="ops">
+            <button type="button" class="btn btn-linea btn-sm" @click="abrir(t.id)">Abrir</button>
+            <button type="button" class="btn btn-plano btn-sm" @click="duplicar(t.id)">Duplicar</button>
+            <button type="button" class="btn btn-plano btn-sm" @click="pedirBorrado(t)">Borrar</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </main>
+
+  <!-- ---------- EDITOR POR PASOS ---------- -->
+  <main class="contenido" x-show="pantalla === 'editor'">
+    <div class="encabezado">
+      <div>
+        <h1 x-text="prop.dir || 'Nueva tasación'"></h1>
+        <p>
+          <span x-text="prop.zona || 'Sin barrio asignado'"></span> ·
+          <span x-text="idActual ? 'Guardada' : 'Sin guardar'"></span>
+        </p>
+      </div>
+      <div class="acciones">
+        <select x-model="estado" @change="guardar(true)" style="width:auto">
+          <option value="borrador">Borrador</option>
+          <option value="enviada">Enviada al cliente</option>
+          <option value="cerrada">Operación cerrada</option>
+        </select>
+        <button type="button" class="btn btn-plano" @click="volverALista()">← Histórico</button>
+      </div>
+    </div>
+
+    <nav class="pasos" aria-label="Etapas de la tasación">
+      <template x-for="(p, i) in pasos" :key="i">
+        <div style="display:contents">
+          <div class="via" x-show="i > 0"></div>
+          <button type="button" class="paso" :class="i === paso ? 'activo' : (i < paso ? 'hecho' : '')"
+                  @click="irA(i)">
+            <span class="n" x-text="i + 1"></span>
+            <span class="t" x-text="p.corto"></span>
+          </button>
+        </div>
+      </template>
+    </nav>
+
+    <section class="bloque">
+      <h2 x-text="pasos[paso].nombre"></h2>
+      <p class="sub" x-text="pasos[paso].ayuda"></p>
+<!-- ---------- PASO 1 · Propiedad ---------- -->
+      <div x-show="paso===0">
+        <fieldset>
+          <legend>Identificación</legend>
+          <div class="field">
+            <label for="zona">Zona / Barrio</label>
+            <select id="zona" x-model="zonaSel" @change="elegirBarrio()">
+              <template x-for="z in barrios" :key="z.id">
+                <option :value="z.nombre" x-text="z.nombre"></option>
+              </template>
+              <option value="__otro">Otro barrio…</option>
+            </select>
+          </div>
+
+          <div class="field" x-show="zonaSel === '__otro'">
+            <label for="zonaLibre">Nombre del barrio</label>
+            <input id="zonaLibre" type="text" x-model="prop.zona" placeholder="Villa Real">
+            <button type="button" class="link-auto" style="margin-top:.4rem"
+                    @click="guardarBarrioActual()">Agregar este barrio a la matriz</button>
+          </div>
+
+          <p class="hint" x-show="valorRefM2 > 0">
+            Referencia de <b><span x-text="prop.zona"></span></b>:
+            <b><span x-text="usd(valorRefM2)"></span> /m²</b> ·
+            coeficientes <span x-text="coef.cub"></span> / <span x-text="coef.semi"></span> /
+            <span x-text="coef.desc"></span>.
+            <button type="button" class="link-auto" @click="pantalla='config'">Editar matriz</button>
+          </p>
+
+          <div class="field">
+            <label for="dir">Dirección</label>
+            <input id="dir" type="text" x-model="prop.dir" placeholder="Campana 3874">
+            <div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap" x-show="prop.dir">
+              <a class="chip-link" :href="urlMapa" target="_blank" rel="noopener">📍 Ver en Google Maps</a>
+              <button type="button" class="link-auto" @click="mapaAbierto = !mapaAbierto"
+                      x-text="mapaAbierto ? 'Ocultar mapa' : 'Previsualizar mapa'"></button>
+            </div>
+            <template x-if="mapaAbierto && prop.dir">
+              <iframe class="mapa" :src="urlMapaEmbed" loading="lazy"
+                      referrerpolicy="no-referrer-when-downgrade" title="Ubicación de la propiedad"></iframe>
+            </template>
+          </div>
+          <div class="field"><label for="tipo">Tipo de propiedad</label>
+            <input id="tipo" type="text" x-model="prop.tipo" placeholder="PH de 3 ambientes con terraza propia"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Superficies relevadas</legend>
+          <div class="row row-3">
+            <div class="field"><label for="cub">Cubiertos</label>
+              <div class="unit"><input id="cub" type="number" step="0.01" min="0" x-model.number="prop.cub"><span>m²</span></div></div>
+            <div class="field"><label for="semi">Semicub.</label>
+              <div class="unit"><input id="semi" type="number" step="0.01" min="0" x-model.number="prop.semi"><span>m²</span></div></div>
+            <div class="field"><label for="desc">Descub.</label>
+              <div class="unit"><input id="desc" type="number" step="0.01" min="0" x-model.number="prop.desc"><span>m²</span></div></div>
+          </div>
+          <p class="hint">
+            Superficie homogeneizada: <b><span x-text="num(supHom,2)"></span> m²</b>
+            sobre <span x-text="num(supTotal,2)"></span> m² totales.
+          </p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Coeficientes de homogeneización</legend>
+          <div class="row row-3">
+            <div class="field"><label for="k1">Cubierto</label>
+              <input id="k1" type="number" step="0.01" x-model.number="coef.cub"></div>
+            <div class="field"><label for="k2">Semicub.</label>
+              <input id="k2" type="number" step="0.01" x-model.number="coef.semi"></div>
+            <div class="field"><label for="k3">Descub.</label>
+              <input id="k3" type="number" step="0.01" x-model.number="coef.desc"></div>
+          </div>
+        </fieldset>
+      </div>
+
+      <!-- ---------- PASO 2 · Competencia ---------- -->
+      <div x-show="paso===1">
+        <fieldset>
+          <legend>Oferta publicada en la zona</legend>
+          <div class="field"><label for="cSim">Propiedades similares publicadas</label>
+            <input id="cSim" type="number" min="0" x-model.number="comp.similares"></div>
+          <div class="row row-3">
+            <div class="field"><label for="cFo">Con fotos prof.</label>
+              <input id="cFo" type="number" min="0" x-model.number="comp.fotos"></div>
+            <div class="field"><label for="cVi">Con video</label>
+              <input id="cVi" type="number" min="0" x-model.number="comp.video"></div>
+            <div class="field"><label for="cTo">Con tour 360°</label>
+              <input id="cTo" type="number" min="0" x-model.number="comp.tour"></div>
+          </div>
+          <p class="hint">
+            Sobre <span x-text="num(comp.similares)"></span> publicaciones:
+            fotos <b><span x-text="num(pctFotos,0)"></span>%</b> ·
+            video <b><span x-text="num(pctVideo,0)"></span>%</b> ·
+            360° <b><span x-text="num(pctTour,0)"></span>%</b>.
+          </p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Rango de precios de la competencia</legend>
+          <div class="row row-2">
+            <div class="field"><label for="rMin">Mínimo</label>
+              <div class="unit"><input id="rMin" type="number" step="1000" min="0" x-model.number="comp.min"><span>USD</span></div></div>
+            <div class="field"><label for="rMax">Máximo</label>
+              <div class="unit"><input id="rMax" type="number" step="1000" min="0" x-model.number="comp.max"><span>USD</span></div></div>
+          </div>
+          <p class="hint">
+            Amplitud del rango: <b><span x-text="usd(comp.max - comp.min)"></span></b>.
+            Tu publicación inicial se ubica en el percentil
+            <b><span x-text="num(posEnRango(estrategia.mes1),0)"></span>%</b> de la oferta.
+          </p>
+        </fieldset>
+      </div>
+
+      <!-- ---------- PASO 3 · Referencias destacadas ---------- -->
+      <div x-show="paso===2">
+        <p class="sub">
+          Tres publicaciones que el propietario puede ver con sus propios ojos: el piso, el techo
+          y la que más se parece a su propiedad.
+        </p>
+
+        <template x-for="(d, i) in destacadas" :key="d.rol">
+          <div class="card accent">
+            <header>
+              <span class="tag"><i></i><span x-text="d.rol"></span></span>
+              <button type="button" class="icon-btn" x-show="d.foto" @click="d.foto=''"
+                      title="Quitar imagen">✕ imagen</button>
+            </header>
+
+            <img class="thumb" x-show="d.foto" :src="d.foto" alt="">
+            <div class="field">
+              <label :for="'f'+i">Imagen de la publicación</label>
+              <input :id="'f'+i" type="file" accept="image/*" @change="cargarFoto($event, d)">
+            </div>
+            <div class="field"><label :for="'dt'+i">Título</label>
+              <input :id="'dt'+i" type="text" x-model="d.titulo" placeholder="PH 3 amb. con patio"></div>
+            <div class="row row-3">
+              <div class="field"><label :for="'dp'+i">Precio</label>
+                <input :id="'dp'+i" type="number" step="1000" min="0" x-model.number="d.precio"></div>
+              <div class="field"><label :for="'dm'+i">m²</label>
+                <input :id="'dm'+i" type="number" step="0.01" min="0" x-model.number="d.m2"></div>
+              <div class="field"><label :for="'da'+i">Amb.</label>
+                <input :id="'da'+i" type="number" min="0" x-model.number="d.ambientes"></div>
+            </div>
+            <div class="field"><label :for="'dc'+i">Características</label>
+              <textarea :id="'dc'+i" x-model="d.caracteristicas"
+                        placeholder="Patio, terraza, apto crédito, sin expensas..."></textarea></div>
+            <div class="field"><label :for="'du'+i">URL de la publicación</label>
+              <input :id="'du'+i" type="url" x-model="d.url" placeholder="https://..."></div>
+
+            <div class="readout">
+              <span>Valor por m²</span>
+              <b x-text="d.m2 > 0 ? usd(d.precio / d.m2) + ' /m²' : '—'"></b>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ---------- PASO 4 · Comparables ---------- -->
+      <div x-show="paso===3">
+        <p class="sub">
+          Los comparables alimentan el cálculo del valor. Cada precio se ajusta por estado
+          y se lleva a valor por metro homogeneizado.
+        </p>
+
+        <template x-for="(c, i) in comps" :key="c.id">
+          <div class="card accent">
+            <header>
+              <span class="tag"><i></i>Comparable <span x-text="i+1"></span></span>
+              <button type="button" class="icon-btn" @click="quitarComp(i)"
+                      :aria-label="'Quitar comparable ' + (i+1)">✕</button>
+            </header>
+            <div class="field"><label :for="'t'+c.id">Título / descripción</label>
+              <input :id="'t'+c.id" type="text" x-model="c.titulo" placeholder="PH 3 amb. con terraza"></div>
+            <div class="field"><label :for="'u'+c.id">URL (opcional)</label>
+              <input :id="'u'+c.id" type="url" x-model="c.url" placeholder="https://..."></div>
+            <div class="row row-3">
+              <div class="field"><label :for="'p'+c.id">Precio</label>
+                <input :id="'p'+c.id" type="number" step="1000" min="0" x-model.number="c.precio"></div>
+              <div class="field"><label :for="'m'+c.id">m² homog.</label>
+                <input :id="'m'+c.id" type="number" step="0.01" min="0" x-model.number="c.m2"></div>
+              <div class="field"><label :for="'c'+c.id">Coef.</label>
+                <input :id="'c'+c.id" type="number" step="0.01" min="0" x-model.number="c.coef"></div>
+            </div>
+            <div class="readout">
+              <span>Valor de referencia</span>
+              <b x-text="usd(valorM2(c), 2) + ' /m²'"></b>
+            </div>
+          </div>
+        </template>
+
+        <button type="button" class="btn-add" @click="agregarComp()">+ Agregar comparable</button>
+        <p class="hint" style="margin-top:.8rem">
+          Promedio de <span x-text="comps.length"></span> comparables:
+          <b><span x-text="usd(promedioM2,2)"></span> /m²</b> →
+          valuación <b><span x-text="usd(valuacion)"></span></b>.
+        </p>
+      </div>
+
+      <!-- ---------- PASO 5 · Estrategia ---------- -->
+      <div x-show="paso===4">
+        <fieldset>
+          <legend>Escalonamiento de publicación</legend>
+          <div class="row row-2">
+            <div class="field"><label for="m1">Días 1 a 30</label>
+              <div class="unit"><input id="m1" type="number" step="1000" min="0" x-model.number="estrategia.mes1"><span>USD</span></div></div>
+            <div class="field"><label for="m2">Día 31 en adelante</label>
+              <div class="unit"><input id="m2" type="number" step="1000" min="0" x-model.number="estrategia.mes2"><span>USD</span></div></div>
+          </div>
+          <div class="field">
+            <label for="obj">
+              Objetivo de cierre
+              <button type="button" class="link-auto" x-show="!objetivoAuto" @click="volverAuto()">usar el cálculo</button>
+              <span x-show="objetivoAuto" style="color:var(--dorado-claro)">· automático</span>
+            </label>
+            <div class="unit">
+              <input id="obj" type="number" step="1000" min="0" :value="objetivoCierre"
+                     @input="fijarObjetivo($event.target.value)"><span>USD</span>
+            </div>
+          </div>
+          <p class="hint">
+            Publicar entre 10 % y 13 % por encima del objetivo deja margen de negociación.
+            <button type="button" class="link-auto" @click="sugerirPrecios()">Aplicar sugerencia</button>
+          </p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Simulación de posicionamiento</legend>
+          <div class="card">
+            <div class="readout" style="border:0;padding-top:0;margin-top:0">
+              <span>Valuación por comparables</span><b x-text="usd(valuacion)"></b></div>
+            <div class="readout"><span>Publicación inicial</span><b x-text="usd(estrategia.mes1)"></b></div>
+            <div class="readout"><span>Brecha hasta el objetivo</span>
+              <b x-text="num(brechaPct,1) + ' %'"></b></div>
+            <div class="readout"><span>Percentil en la competencia</span>
+              <b x-text="num(posEnRango(estrategia.mes1),0) + ' %'"></b></div>
+          </div>
+        </fieldset>
+      </div>
+
+      <!-- ---------- PASO 6 · Contexto e institucional ---------- -->
+      <div x-show="paso===5">
+        <fieldset>
+          <legend>Datos generales del mercado</legend>
+          <div class="row row-2">
+            <div class="field"><label for="ev">En venta</label>
+              <input id="ev" type="number" min="1" x-model.number="mercado.enVenta"></div>
+            <div class="field"><label for="vd">Vendidas</label>
+              <input id="vd" type="number" min="0" x-model.number="mercado.vendidas"></div>
+          </div>
+          <div class="field"><label for="ref">Período de referencia</label>
+            <input id="ref" type="text" x-model="mercado.ref" placeholder="Julio 2026"></div>
+          <p class="hint">Se vende el <b><span x-text="num(porcentajeVenta,1)"></span> %</b> de lo publicado.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Condiciones y firma</legend>
+          <div class="row row-2">
+            <div class="field"><label for="dias">Días de exclusiva</label>
+              <input id="dias" type="number" min="0" x-model.number="cond.dias"></div>
+            <div class="field"><label for="hon">Honorarios</label>
+              <div class="unit"><input id="hon" type="number" step="0.1" min="0" x-model.number="cond.honorarios"><span>%</span></div></div>
+          </div>
+          <div class="field"><label for="ag">Corredor</label>
+            <input id="ag" type="text" x-model="cond.agente"></div>
+          <div class="field"><label for="mat">Matrícula</label>
+            <input id="mat" type="text" x-model="cond.matricula"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Informe listo</legend>
+          <div class="row row-2">
+            <button type="button" class="btn btn-primario" @click="abrirVisor()">Ver informe completo</button>
+            <button type="button" class="btn btn-linea" @click="exportarWord()">Descargar Word</button>
+          </div>
+          <p class="hint" style="margin-top:.8rem">
+            La vista previa se abre en pantalla completa y desde ahí se descarga el PDF.
+            El Word sale editable, con la misma información en formato de documento.
+          </p>
+        </fieldset>
+      </div>
+    </section>
+
+    <div class="barra">
+      <div class="cifras">
+        <div><small>Valuación</small><b x-text="usd(valuacion)"></b></div>
+        <div><small>Publicación</small><b x-text="usd(estrategia.mes1)"></b></div>
+        <div><small>Cierre</small><b class="oro" x-text="usd(objetivoCierre)"></b></div>
+      </div>
+      <div class="nav">
+        <button type="button" class="btn btn-plano" @click="guardar()"
+                x-text="guardando ? 'Guardando…' : 'Guardar'"></button>
+        <button type="button" class="btn btn-linea" @click="prev()" :disabled="paso === 0">Atrás</button>
+        <button type="button" class="btn btn-primario" @click="next()" x-show="paso < pasos.length - 1">Siguiente</button>
+        <button type="button" class="btn btn-dorado" @click="abrirVisor()" x-show="paso === pasos.length - 1">Vista previa</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ---------- CONFIGURACIÓN ---------- -->
+  <main class="contenido" x-show="pantalla === 'config'">
+    <div class="encabezado">
+      <div>
+        <h1>Configuración</h1>
+        <p>Parámetros y matriz de barrios que usan todas las tasaciones</p>
+      </div>
+      <div class="acciones">
+        <button type="button" class="btn btn-primario" @click="guardarConfig()"
+                x-text="guardandoConfig ? 'Guardando…' : 'Guardar cambios'"></button>
+        <button type="button" class="btn btn-plano" @click="volverALista()">← Histórico</button>
+      </div>
+    </div>
+
+    <section class="bloque">
+<!-- Matriz de barrios -->
+      <fieldset>
+        <legend>Matriz de barrios</legend>
+        <p class="aviso">
+          Cada barrio tiene su propio valor de referencia por m² y su forma de ponderar las superficies:
+          donde predominan casas y PH el patio pesa más que en una zona de torres.
+          Los valores cargados son orientativos: reemplazalos con tus propios datos de cierre.
+        </p>
+
+        <div class="tabla-wrap">
+          <table class="matriz">
+            <thead>
+              <tr>
+                <th style="min-width:120px">Barrio</th>
+                <th class="n" style="width:74px">USD/m²</th>
+                <th class="n" style="width:56px">Cub.</th>
+                <th class="n" style="width:56px">Semi</th>
+                <th class="n" style="width:56px">Desc.</th>
+                <th class="del"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(z, i) in barrios" :key="z.id">
+                <tr>
+                  <td><input type="text" x-model="z.nombre" placeholder="Barrio"></td>
+                  <td><input class="n" type="number" step="10" min="0" x-model.number="z.valorM2"></td>
+                  <td><input class="n" type="number" step="0.01" min="0" x-model.number="z.cub"></td>
+                  <td><input class="n" type="number" step="0.01" min="0" x-model.number="z.semi"></td>
+                  <td><input class="n" type="number" step="0.01" min="0" x-model.number="z.desc"></td>
+                  <td><button type="button" class="icon-btn" @click="quitarBarrio(i)"
+                              :aria-label="'Quitar ' + z.nombre">✕</button></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <button type="button" class="btn-add" style="margin-top:.6rem" @click="agregarBarrio()">+ Agregar barrio</button>
+      </fieldset>
+
+      <!-- Parámetros de precios -->
+      <fieldset>
+        <legend>Parámetros de precios</legend>
+        <div class="row row-2">
+          <div class="field"><label for="pm1">Recargo mes 1</label>
+            <div class="unit"><input id="pm1" type="number" step="0.5" x-model.number="params.mes1Pct"><span>%</span></div></div>
+          <div class="field"><label for="pm2">Recargo mes 2</label>
+            <div class="unit"><input id="pm2" type="number" step="0.5" x-model.number="params.mes2Pct"><span>%</span></div></div>
+        </div>
+        <div class="field"><label for="pred">Redondeo de precios</label>
+          <div class="unit"><input id="pred" type="number" step="500" min="1" x-model.number="params.redondeo"><span>USD</span></div></div>
+        <p class="hint">
+          Sobre un objetivo de <b><span x-text="usd(objetivoCierre)"></span></b> la sugerencia daría
+          <b><span x-text="usd(precioSugerido(params.mes1Pct))"></span></b> y
+          <b><span x-text="usd(precioSugerido(params.mes2Pct))"></span></b>.
+        </p>
+      </fieldset>
+
+      <!-- Homogeneización por defecto -->
+      <fieldset>
+        <legend>Homogeneización por defecto</legend>
+        <p class="hint">Se usa cuando el barrio elegido no tiene coeficientes propios.</p>
+        <div class="row row-3">
+          <div class="field"><label for="dk1">Cubierto</label>
+            <input id="dk1" type="number" step="0.01" x-model.number="params.coefCub"></div>
+          <div class="field"><label for="dk2">Semicub.</label>
+            <input id="dk2" type="number" step="0.01" x-model.number="params.coefSemi"></div>
+          <div class="field"><label for="dk3">Descub.</label>
+            <input id="dk3" type="number" step="0.01" x-model.number="params.coefDesc"></div>
+        </div>
+      </fieldset>
+
+      <!-- Condiciones comerciales -->
+      <fieldset>
+        <legend>Condiciones comerciales por defecto</legend>
+        <div class="row row-2">
+          <div class="field"><label for="pdias">Días de exclusiva</label>
+            <input id="pdias" type="number" min="0" x-model.number="params.dias"></div>
+          <div class="field"><label for="phon">Honorarios</label>
+            <div class="unit"><input id="phon" type="number" step="0.1" min="0" x-model.number="params.honorarios"><span>%</span></div></div>
+        </div>
+        <div class="field"><label for="pciu">Ciudad para el mapa</label>
+          <input id="pciu" type="text" x-model="params.ciudad" placeholder="Ciudad Autónoma de Buenos Aires"></div>
+        <button type="button" class="btn btn-linea" style="width:100%;justify-content:center"
+                @click="aplicarDefaults()">Aplicar a la tasación actual</button>
+      </fieldset>
+
+      <!-- Copia de seguridad -->
+      <fieldset>
+        <legend>Copia de seguridad</legend>
+        <p class="hint">
+          La configuración y las tasaciones viven en el servidor. Igual conviene bajar una copia
+          cada tanto: el archivo sirve para restaurar la matriz en otra instalación.
+        </p>
+        <div class="row row-2">
+          <button type="button" class="btn btn-linea" @click="bajarConfig()">Bajar copia .json</button>
+          <label class="btn btn-linea" style="cursor:pointer;margin:0">
+            <span>Restaurar copia</span>
+            <input type="file" accept="application/json,.json" @change="subirConfig($event)" style="display:none">
+          </label>
+        </div>
+        <button type="button" class="btn btn-plano" style="width:100%;margin-top:.6rem"
+                @click="restablecer()">Restablecer valores de fábrica</button>
+      </fieldset>
+
+
+    </section>
+  </main>
+</div>
+
+<!-- ============================================================
+     VISTA PREVIA A PANTALLA COMPLETA
+     ============================================================ -->
+<div class="visor" x-show="visor" x-cloak>
+  <div class="cabecera no-print">
+    <button type="button" class="btn btn-plano" @click="cerrarVisor()">← Volver a editar</button>
+    <div class="tit">
+      <span x-text="prop.dir || 'Tasación'"></span>
+      <small x-text="prop.zona"></small>
+    </div>
+    <div class="zoomctl">
+      <button type="button" @click="setZoom(-6)" aria-label="Alejar">−</button>
+      <button type="button" class="pc" @click="ajustarZoom()" title="Ajustar a la pantalla" x-text="zoom + '%'"></button>
+      <button type="button" @click="setZoom(6)" aria-label="Acercar">+</button>
+    </div>
+    <button type="button" class="btn btn-linea" @click="exportarWord()">Word</button>
+    <button type="button" class="btn btn-dorado" @click="window.print()">Descargar PDF</button>
+  </div>
+
+  <div class="lienzo" x-ref="lienzo">
+    <nav class="pagenav no-print" aria-label="Páginas del informe">
+      <template x-for="(h, i) in hojas" :key="i">
+        <button type="button" @click="verHoja(i)" :class="hojaActiva === i ? 'on' : ''" x-text="h"></button>
+      </template>
+    </nav>
+
+    <div class="stack">
+<!-- ---------- HOJA 1 · Presentación institucional ---------- -->
+      <article class="page cover" id="hoja0">
+        <img class="logo-lockup" src="/img/logo.jpg"
+             alt="González Inmuebles · Impulsamos tus proyectos de vida">
+
+        <p class="p-doc" style="margin-top:8mm;max-width:150mm;text-align:center">
+          Vender una propiedad es una decisión patrimonial, no una publicación más.
+          Trabajamos con información verificable, precios sostenidos en el análisis de mercado y
+          un proceso transparente en cada etapa: desde la tasación hasta la escritura.
+          Nuestro compromiso es que cada dueño entienda por qué su propiedad vale lo que vale
+          y cómo se va a vender.
+        </p>
+
+        <div class="premium">
+          <div class="bar">ESTRATEGIA COMERCIAL PREMIUM<hr></div>
+          <div class="grid">
+            <div class="svc"><h4>Fotografías profesionales</h4>
+              <div class="art"><img src="/img/fotos.jpg" alt="Sesión fotográfica profesional en un living"></div></div>
+            <div class="svc"><h4>Video recorridos</h4>
+              <div class="art"><img src="/img/video.jpg" alt="Video recorrido de una propiedad en tablet"></div></div>
+            <div class="svc"><h4>Tour virtual 360°</h4>
+              <div class="art"><img src="/img/tour.jpg" alt="Cámara 360° relevando un dormitorio"></div></div>
+            <div class="svc"><h4>Planos comerciales</h4>
+              <div class="art"><img src="/img/planos.jpg" alt="Planos comerciales en pantalla"></div></div>
+          </div>
+          <div class="closing">
+            <strong>UNA ESTRATEGIA COMPLETA PARA VENDER MEJOR</strong>
+            <span>Fotos + video + tour 360° + planos + publicación multiplataforma</span>
+            <span class="lema">MÁS ALCANCE · MÁS CONSULTAS · MÁS VISITAS · MEJOR CIERRE</span>
+          </div>
+        </div>
+
+        <div class="page-foot">González Inmuebles · Presentación comercial · <span class="n">1</span></div>
+      </article>
+
+      <!-- ---------- HOJA 2 · Mercado y precio ---------- -->
+      <article class="page" id="hoja1">
+        <p class="eyebrow" style="text-align:center">Contexto</p>
+        <h2 class="h-doc" style="text-align:center;font-size:19pt">El mercado y la importancia del precio</h2>
+
+        <div class="kpis">
+          <div class="kpi"><div class="pill">Propiedades en venta</div>
+            <div class="big" x-text="num(mercado.enVenta)"></div></div>
+          <div class="kpi"><div class="pill">Propiedades vendidas</div>
+            <div class="big" x-text="num(mercado.vendidas)"></div></div>
+        </div>
+        <p class="ref">Datos de referencia · <span x-text="mercado.ref"></span></p>
+
+        <div class="pictogram" aria-hidden="true">
+          <template x-for="i in 100" :key="i">
+            <svg viewBox="0 0 24 24" :class="i <= casasLlenas ? 'on' : ''"><use href="#ico-casa"/></svg>
+          </template>
+        </div>
+
+        <div class="pct-wrap">
+          <div class="lead">HOY SE VENDE SOLO EL</div>
+          <div class="pct-circle" x-text="num(porcentajeVenta,1) + '%'"></div>
+          <div class="lead">DE LO PUBLICADO</div>
+          <p class="note-gold">Los valores de publicación no reflejan por sí solos la realidad.</p>
+          <p class="note-strong">Lo que importa son los precios de cierre.</p>
+        </div>
+
+        <div class="dfn" style="margin-top:6mm">
+          <div><b>Precio de publicación</b> es el que figura en el aviso. <b>Precio de cierre</b> es el que
+          finalmente se firma en la escritura, después de negociar. Rara vez son el mismo número, y el
+          que marca el valor real de un barrio es el segundo.</div>
+        </div>
+
+        <div class="banner" style="margin-top:5mm">
+          <strong>PRECIO CORRECTO + COMERCIALIZACIÓN PROFESIONAL</strong>
+          <span>son las dos variables que convierten un aviso en una venta.</span>
+        </div>
+
+        <div class="page-foot">González Inmuebles · Presentación comercial · <span class="n">2</span></div>
+      </article>
+
+      <!-- ---------- HOJA 3 · Radiografía de la competencia ---------- -->
+      <article class="page" id="hoja2">
+        <p class="eyebrow">Análisis de mercado</p>
+        <h2 class="h-doc" style="font-size:19pt">
+          Contra quién compite tu propiedad en <span x-text="prop.zona || 'la zona'"></span>
+        </h2>
+        <p class="p-doc" style="margin-top:3mm">
+          Relevamos la oferta publicada de propiedades similares y cómo está presentada.
+          No alcanza con saber cuántas hay: importa con qué material compiten por la atención
+          del mismo comprador.
+        </p>
+
+        <div class="tiles">
+          <div class="tile lead">
+            <div class="n" x-text="num(comp.similares)"></div>
+            <small>Propiedades similares publicadas</small>
+          </div>
+          <div class="tile">
+            <div class="n" x-text="num(comp.fotos)"></div>
+            <small>Con fotos profesionales</small>
+            <span class="pc" x-text="num(pctFotos,0) + '%'"></span>
+          </div>
+          <div class="tile">
+            <div class="n" x-text="num(comp.video)"></div>
+            <small>Con video</small>
+            <span class="pc" x-text="num(pctVideo,0) + '%'"></span>
+          </div>
+          <div class="tile">
+            <div class="n" x-text="num(comp.tour)"></div>
+            <small>Con recorrido 360°</small>
+            <span class="pc" x-text="num(pctTour,0) + '%'"></span>
+          </div>
+        </div>
+
+        <h3 class="h-sec" style="margin-top:5mm">Cómo se presenta la competencia</h3>
+        <div class="barq">
+          <div class="line">
+            <div class="lb">Fotos profesionales</div>
+            <div class="track"><div class="fill" :style="'width:' + pctFotos + '%'"></div></div>
+            <div class="vl" x-text="num(pctFotos,0) + '%'"></div>
+          </div>
+          <div class="line">
+            <div class="lb">Video</div>
+            <div class="track"><div class="fill gold" :style="'width:' + pctVideo + '%'"></div></div>
+            <div class="vl" x-text="num(pctVideo,0) + '%'"></div>
+          </div>
+          <div class="line">
+            <div class="lb">Recorrido 360°</div>
+            <div class="track"><div class="fill gold" :style="'width:' + pctTour + '%'"></div></div>
+            <div class="vl" x-text="num(pctTour,0) + '%'"></div>
+          </div>
+        </div>
+
+        <div class="insight">
+          De las <b><span x-text="num(comp.similares)"></span></b> publicaciones que compiten con tu propiedad,
+          <b><span x-text="num(comp.similares - comp.video)"></span></b> no tienen video y
+          <b><span x-text="num(comp.similares - comp.tour)"></span></b> no ofrecen recorrido 360°.
+          Publicar con fotos profesionales, video, tour virtual y planos deja tu aviso dentro del
+          <b><span x-text="num(pctTour,0)"></span> %</b> mejor presentado del segmento: más tiempo de
+          visualización, más consultas y visitas mejor calificadas.
+        </div>
+
+        <h3 class="h-sec" style="margin-top:6mm">Rango de precios de la competencia</h3>
+        <div class="rango">
+          <div class="ends">
+            <div>Más económica<b x-text="usd(comp.min)"></b></div>
+            <div>Más cara<b x-text="usd(comp.max)"></b></div>
+          </div>
+          <div class="scale-wrap">
+            <!-- Etiqueta superior: precio de publicación -->
+            <div class="tag up" :style="'left:' + posEtiqueta(estrategia.mes1) + '%'">
+              <em>Publicación</em><b x-text="usd(estrategia.mes1)"></b>
+            </div>
+
+            <div class="scale">
+              <div class="mark" :style="'left:' + posEnRango(estrategia.mes1) + '%'"></div>
+              <div class="mark obj" :style="'left:' + posEnRango(objetivoCierre) + '%'"></div>
+            </div>
+
+            <!-- Etiqueta inferior: objetivo de cierre -->
+            <div class="tag down" :style="'left:' + posEtiqueta(objetivoCierre) + '%'">
+              <em>Objetivo de cierre</em><b x-text="usd(objetivoCierre)"></b>
+            </div>
+          </div>
+          <p class="p-doc" style="font-size:8.4pt;margin-top:2mm">
+            Entre la propiedad más barata y la más cara del segmento hay
+            <b><span x-text="usd(comp.max - comp.min)"></span></b> de diferencia. El precio de salida
+            propuesto queda por encima del <b><span x-text="num(posEnRango(estrategia.mes1),0)"></span> %</b>
+            de lo que hoy se ofrece en la zona: lo suficientemente alto para dejar margen de negociación,
+            sin quedar fuera de lo que el comprador está mirando.
+          </p>
+        </div>
+
+        <div class="page-foot">González Inmuebles · Análisis de mercado · <span class="n">3</span></div>
+      </article>
+
+      <!-- ---------- HOJA 4 · Referencias del mercado ---------- -->
+      <article class="page" id="hoja3">
+        <p class="eyebrow">Análisis de mercado</p>
+        <h2 class="h-doc" style="font-size:19pt">Los tres extremos del mercado hoy</h2>
+        <p class="p-doc" style="margin-top:3mm">
+          El piso, el techo y la publicación más parecida a tu propiedad. Son avisos activos
+          que cualquier comprador puede ver: sirven para entender contra qué se compara tu precio
+          y qué expectativa tiene quien consulta.
+        </p>
+
+        <div class="fichas">
+          <template x-for="d in destacadas" :key="d.rol">
+            <div class="ficha" :class="d.destacar ? 'hero' : ''">
+              <div class="rol" x-text="d.rol"></div>
+              <template x-if="d.foto">
+                <div class="ph"><img :src="d.foto" alt=""></div>
+              </template>
+              <template x-if="!d.foto">
+                <div class="ph empty">Sin imagen</div>
+              </template>
+              <div class="bd">
+                <div class="pr" x-text="usd(d.precio)"></div>
+                <div class="m2" x-text="d.m2 > 0 ? usd(d.precio / d.m2) + ' / m²' : '—'"></div>
+                <div class="specs">
+                  <span x-show="d.m2 > 0" x-text="num(d.m2,0) + ' m²'"></span>
+                  <span x-show="d.ambientes > 0" x-text="num(d.ambientes) + ' amb.'"></span>
+                </div>
+                <div class="ti" x-text="d.titulo"></div>
+                <div class="ca" x-text="d.caracteristicas"></div>
+                <template x-if="d.url">
+                  <a class="lk" :href="d.url" target="_blank" rel="noopener">Ver publicación ↗</a>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="insight" style="margin-top:6mm">
+          Entre la propiedad más económica y la más cara del segmento hay
+          <b><span x-text="usd(comp.max - comp.min)"></span></b> de diferencia, y esa distancia
+          no la explica solo el metraje: la explican el estado, la orientación, los espacios
+          exteriores y —muy especialmente— cómo está presentada la publicación.
+          La referencia más parecida a
+          <b><span x-text="prop.dir || 'tu propiedad'"></span></b> es el punto de partida honesto
+          para fijar el precio de salida.
+        </div>
+
+        <div class="page-foot">González Inmuebles · Análisis de mercado · <span class="n">4</span></div>
+      </article>
+
+      <!-- ---------- HOJA 5 · La propiedad tasada ---------- -->
+      <article class="page" id="hoja4">
+        <div class="headline">
+          <p class="eyebrow">Carpeta de tasación</p>
+          <h1 class="h-doc">
+            <span x-text="prop.dir || 'Dirección de la propiedad'"></span>
+            <span style="color:var(--dorado)" x-show="prop.zona"> · <span x-text="prop.zona"></span></span>
+          </h1>
+          <p class="p-doc" style="margin:2mm 0 0;font-size:8.5pt;color:var(--tinta-suave)">
+            Análisis de mercado · Comparables · Estrategia de comercialización
+          </p>
+        </div>
+
+        <!-- Resumen en lenguaje llano -->
+        <div class="resumen">
+          <div class="tt">En pocas palabras</div>
+          <p>
+            Tu propiedad equivale a <b><span x-text="num(supHom,2)"></span> m² comparables</b>.
+            Hoy, propiedades parecidas en <b x-text="prop.zona || 'la zona'"></b> se ofrecen a un promedio de
+            <b><span x-text="usd(promedioM2)"></span> por metro</b>. Multiplicando una cosa por la otra,
+            el valor estimado de mercado es de <b><span x-text="usd(valuacion)"></span></b>.
+            Considerando el estado de la unidad y el tiempo de venta buscado, proponemos publicarla en
+            <b><span x-text="usd(estrategia.mes1)"></span></b> y trabajar con un objetivo de cierre de
+            <b><span x-text="usd(objetivoCierre)"></span></b>.
+          </p>
+        </div>
+
+        <h3 class="h-sec"><span class="num">1</span> La propiedad y cómo se mide</h3>
+        <p class="p-doc">
+          La tasación se realizó a partir de la visita a
+          <b x-text="prop.dir || 'la propiedad'"></b><span x-text="prop.tipo ? ' (' + prop.tipo + ')' : ''"></span>,
+          considerando sus superficies, su distribución y su estado, y comparándola con propiedades
+          que hoy se ofrecen en <span x-text="prop.zona || 'la zona'"></span>.
+        </p>
+
+        <div class="dfn">
+          <div><b>Tasar</b> es estimar en cuánto puede venderse hoy una propiedad, mirando a qué precio
+          se están ofreciendo y vendiendo otras parecidas en el mismo barrio. No es un precio fijo:
+          es el punto de partida más razonable para salir a vender.</div>
+        </div>
+
+        <div class="surface-grid">
+          <div class="surface"><small>Cubiertos</small><b x-text="num(prop.cub,2)"></b></div>
+          <div class="surface"><small>Semicubiertos</small><b x-text="num(prop.semi,2)"></b></div>
+          <div class="surface"><small>Descubiertos</small><b x-text="num(prop.desc,2)"></b></div>
+          <div class="surface is-key"><small>Superficie comparable</small><b x-text="num(supHom,2)"></b></div>
+        </div>
+
+        <div class="dfn">
+          <div><b>Superficie comparable</b> (o superficie homogeneizada): un metro de patio o de terraza
+          no vale lo mismo que un metro de living. Para poder comparar propiedades distintas entre sí,
+          cada tipo de metro se cuenta según cuánto aporta realmente al valor. Así, dos propiedades
+          quedan medidas con la misma vara.</div>
+        </div>
+
+        <div class="formula">
+          <b style="color:var(--verde)">La cuenta, paso a paso</b><br>
+          Cada metro cubierto cuenta entero; cada metro semicubierto cuenta
+          <span x-text="num(coef.semi*100,0)"></span> %; cada metro descubierto,
+          <span x-text="num(coef.desc*100,0)"></span> %.
+          <code>(<span x-text="num(prop.cub,2)"></span> × <span x-text="coef.cub"></span>)
+          + (<span x-text="num(prop.semi,2)"></span> × <span x-text="coef.semi"></span>)
+          + (<span x-text="num(prop.desc,2)"></span> × <span x-text="coef.desc"></span>)
+          = <span x-text="num(supHom,2)"></span> m² comparables</code>
+          sobre <span x-text="num(supTotal,2)"></span> m² totales relevados.
+          Estos porcentajes no son iguales en todos los barrios: donde el espacio exterior es más
+          buscado, pesa más.
+        </div>
+
+        <div class="page-foot">González Inmuebles · Carpeta de tasación · <span class="n">5</span></div>
+      </article>
+
+      <!-- ---------- HOJA 6 · Cómo llegamos al valor ---------- -->
+      <article class="page" id="hoja5">
+        <p class="eyebrow">Carpeta de tasación</p>
+        <h2 class="h-doc" style="font-size:19pt">Cómo llegamos al valor</h2>
+
+        <h3 class="h-sec" style="margin-top:5mm"><span class="num">2</span> Propiedades comparables</h3>
+        <p class="p-doc">
+          Se seleccionaron <span x-text="comps.length"></span> propiedades que compiten por el mismo
+          comprador que la tuya. De cada una se calcula cuántos dólares por metro está pidiendo su dueño,
+          y con esos valores se obtiene el promedio de la zona.
+        </p>
+
+        <div class="dfn">
+          <div><b>Comparable</b> es una propiedad parecida a la tuya —en barrio, tamaño y tipo— que hoy
+          está publicada en venta. Sirve como referencia porque un comprador que mira la tuya
+          probablemente también mire esas.</div>
+        </div>
+
+        <div class="dfn">
+          <div><b>Coeficiente de estado</b>: ninguna propiedad es idéntica a otra. Si un comparable está
+          mejor que el tuyo, su precio se ajusta hacia abajo; si está peor, hacia arriba. Un coeficiente
+          de 1,05 suma 5 %; uno de 0,95 resta 5 %. Es la forma de descontar esas diferencias antes de
+          promediar.</div>
+        </div>
+
+        <table class="comps">
+          <thead>
+            <tr><th style="width:40%">Comparable</th><th>Precio pedido</th><th>m² comparables</th><th>USD por m²</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="(c, i) in comps" :key="c.id">
+              <tr>
+                <td>
+                  <span class="t" x-text="c.titulo || ('Comparable ' + (i+1))"></span>
+                  <template x-if="c.url">
+                    <a class="u" :href="c.url" target="_blank" rel="noopener">Ver publicación ↗</a>
+                  </template>
+                </td>
+                <td x-text="usd(c.precio)"></td>
+                <td x-text="num(c.m2,2)"></td>
+                <td><span x-text="usd(valorM2(c),2)"></span>
+                  <span class="coef" x-text="'ajustado por ' + num(c.coef,2)"></span></td>
+              </tr>
+            </template>
+            <tr x-show="comps.length === 0">
+              <td colspan="4" style="text-align:center;color:var(--tinta-suave)">Sin comparables cargados.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="avg-bar">
+          <span>Promedio de la zona por m²</span>
+          <b x-text="usd(promedioM2,2)"></b>
+        </div>
+
+        <p class="p-doc" style="font-size:8pt;color:var(--tinta-suave);margin-top:3mm" x-show="valorRefM2 > 0">
+          Valor de referencia que tenemos registrado para <b x-text="prop.zona"></b>:
+          <b><span x-text="usd(valorRefM2)"></span> por m²</b>. El promedio de estos comparables se ubica
+          <b><span x-text="num(Math.abs(desvioRefPct),1)"></span> %</b>
+          <span x-text="desvioRefPct >= 0 ? 'por encima' : 'por debajo'"></span> de esa referencia.
+        </p>
+
+        <div class="val-box">
+          <div>
+            <div class="eyebrow">Valor estimado de mercado</div>
+            <div style="font-size:8pt;color:var(--tinta-suave);margin-top:1mm">
+              <span x-text="num(supHom,2)"></span> m² comparables ×
+              <span x-text="usd(promedioM2,2)"></span> por m²
+            </div>
+          </div>
+          <div class="big" x-text="usd(valuacion)"></div>
+        </div>
+
+        <div class="dfn">
+          <div><b>Ojo con este número</b>: es el valor que surge de lo que <b>piden</b> otros dueños hoy,
+          no de lo que efectivamente se paga. Casi siempre se vende por menos que el precio publicado.
+          Por eso el precio de salida y el objetivo de cierre son dos números distintos, y los definimos
+          en la página siguiente.</div>
+        </div>
+
+        <div class="page-foot">González Inmuebles · Carpeta de tasación · <span class="n">6</span></div>
+      </article>
+
+      <!-- ---------- HOJA 6 · Estrategia, cierre y condiciones ---------- -->
+      <article class="page" id="hoja6">
+        <p class="eyebrow"><span x-text="prop.dir"></span><span x-show="prop.zona"> · <span x-text="prop.zona"></span></span></p>
+
+        <h3 class="h-sec" style="margin-top:4mm"><span class="num">3</span> Estrategia comercial de publicación</h3>
+        <div class="strategy">
+          <div class="phase">
+            <div class="hd">Primeros 30 días</div>
+            <div class="bd">
+              <div class="val" x-text="usd(estrategia.mes1)"></div>
+              <p class="desc">
+                Ingreso competitivo. Se publica por encima del objetivo para captar interesados y medir
+                la demanda real: consultas, visitas y propuestas.
+              </p>
+            </div>
+          </div>
+          <div class="phase alt">
+            <div class="hd">Desde el día 31</div>
+            <div class="bd">
+              <div class="val" x-text="usd(estrategia.mes2)"></div>
+              <p class="desc">
+                Reposicionamiento planificado: si el primer mes no encamina una operación, se ajusta
+                para ampliar el universo de compradores.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="dfn">
+          <div><b>¿Por qué dos precios?</b> Los primeros 30 días son los de mayor exposición: el aviso
+          es nuevo y aparece primero en los portales. Si en ese mes no llegan ofertas concretas, el
+          mercado está avisando que el precio quedó alto y conviene ajustarlo antes de que el aviso
+          envejezca.</div>
+        </div>
+
+        <h3 class="h-sec" style="margin-top:5mm"><span class="num">4</span> Objetivo de cierre y conclusión</h3>
+        <div class="closing-box">
+          <small>Valor objetivo de cierre</small>
+          <div class="big" x-text="usd(objetivoCierre)"></div>
+          <p>
+            Surge del mercado analizado, las superficies y el margen previsto para negociar:
+            <span x-text="num(brechaPct,1)"></span> % por debajo del precio de salida.
+          </p>
+        </div>
+
+        <div class="terms">
+          <div>
+            <h5>Documentación requerida</h5>
+            <ul>
+              <li>Escritura</li>
+              <li>DNI de todos los propietarios</li>
+              <li>Últimas expensas y facturas de electricidad, agua y gas</li>
+              <li>Últimas boletas de ABL / ARBA e impuesto municipal, si correspondiera</li>
+              <li>Reglamento de copropiedad</li>
+              <li>Plano de subdivisión y mensura</li>
+            </ul>
+          </div>
+          <div class="cond">
+            <h5 style="margin-bottom:0">Trabajamos en exclusiva</h5>
+            <b><span x-text="cond.dias"></span> días</b>
+            <div style="font-size:7.4pt">
+              <b style="font-family:var(--sans);font-size:7.4pt;display:inline;color:var(--verde)">Exclusiva</b>:
+              durante ese plazo somos la única inmobiliaria que comercializa la propiedad. Eso permite
+              invertir en fotos, video y publicación paga, y evita que el mismo inmueble aparezca a
+              distintos precios, algo que ahuyenta compradores.
+            </div>
+            <div style="margin-top:2.5mm">Honorarios por nuestro servicio</div>
+            <b><span x-text="num(cond.honorarios,1)"></span> %</b>
+            <div style="font-size:7.4pt">Se calculan sobre el precio final de venta y se abonan
+              recién al cerrarse la operación.</div>
+          </div>
+        </div>
+
+        <div class="sign">
+          <div class="mg">──── MG ────</div>
+          <div class="nm" x-text="cond.agente"></div>
+          <div class="mt">Corredor Inmobiliario · <span x-text="cond.matricula"></span></div>
+        </div>
+
+        <div class="page-foot">González Inmuebles · Carpeta de tasación · <span class="n">7</span></div>
+      </article>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     AVISOS
+     ============================================================ -->
+<div class="toast no-print" x-show="toast" x-transition x-text="toast"></div>
+
+<div class="modal no-print" x-show="confirmacion" @click.self="confirmacion = null">
+  <div class="caja">
+    <h3 x-text="confirmacion && confirmacion.titulo"></h3>
+    <p x-text="confirmacion && confirmacion.texto"></p>
+    <div class="fin">
+      <button type="button" class="btn btn-plano" @click="confirmacion = null">Cancelar</button>
+      <button type="button" class="btn btn-peligro" @click="confirmacion.accion()">Sí, borrar</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+<script src="/vendor/alpine.min.js" defer></script>
+</body>
+</html>
