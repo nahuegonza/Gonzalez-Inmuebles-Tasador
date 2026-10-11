@@ -102,6 +102,72 @@ app.put('/api/config', requiereSesion, rutaAsync(async (req, res) => {
 }));
 
 /* ============================================================
+   VERIFICACIÓN DE DIRECCIONES
+   Consulta el geocodificador de OpenStreetMap (Nominatim) para
+   confirmar que la calle y la altura existen. Google Maps no
+   ofrece búsqueda sin clave de API; la confirmación visual se
+   hace igual contra Google desde el navegador.
+   ============================================================ */
+const GEO_CACHE = new Map();              // consulta → { cuando, datos }
+const GEO_TTL = 1000 * 60 * 60 * 24;      // un día
+let geoUltima = 0;                        // Nominatim pide máximo 1 consulta por segundo
+
+app.get('/api/geocodificar', requiereSesion, rutaAsync(async (req, res) => {
+  const consulta = String(req.query.q || '').trim();
+  if (consulta.length < 4) return res.json({ ok: false, motivo: 'Consulta demasiado corta' });
+
+  const enCache = GEO_CACHE.get(consulta);
+  if (enCache && Date.now() - enCache.cuando < GEO_TTL) {
+    return res.json({ ok: true, resultados: enCache.datos, cache: true });
+  }
+
+  const espera = Math.max(0, 1100 - (Date.now() - geoUltima));
+  if (espera) await new Promise(r => setTimeout(r, espera));
+  geoUltima = Date.now();
+
+  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5'
+    + '&countrycodes=' + encodeURIComponent(process.env.GEO_PAIS || 'ar')
+    + '&q=' + encodeURIComponent(consulta);
+
+  try {
+    const control = new AbortController();
+    const corte = setTimeout(() => control.abort(), 8000);
+    const r = await fetch(url, {
+      signal: control.signal,
+      headers: {
+        // Nominatim exige identificar la aplicación
+        'User-Agent': 'GonzalezInmuebles-Tasaciones/1.0 (' + (process.env.GEO_CONTACTO || 'contacto@gonzalezinmuebles.com') + ')',
+        'Accept-Language': 'es'
+      }
+    });
+    clearTimeout(corte);
+    if (!r.ok) throw new Error('Respuesta ' + r.status);
+
+    const crudo = await r.json();
+    const resultados = (Array.isArray(crudo) ? crudo : []).map(x => {
+      const d = x.address || {};
+      return {
+        etiqueta: x.display_name,
+        lat: x.lat,
+        lon: x.lon,
+        calle: d.road || '',
+        altura: d.house_number || '',
+        barrio: d.suburb || d.neighbourhood || d.city_district || d.quarter || '',
+        ciudad: d.city || d.town || d.state || '',
+        // Un resultado con altura propia es una coincidencia exacta de puerta
+        exacto: Boolean(d.house_number)
+      };
+    });
+
+    GEO_CACHE.set(consulta, { cuando: Date.now(), datos: resultados });
+    if (GEO_CACHE.size > 500) GEO_CACHE.delete(GEO_CACHE.keys().next().value);
+    res.json({ ok: true, resultados });
+  } catch (e) {
+    res.json({ ok: false, motivo: e.name === 'AbortError' ? 'El servicio tardó demasiado' : e.message });
+  }
+}));
+
+/* ============================================================
    TASACIONES
    ============================================================ */
 // Listado liviano para el histórico: sin fotos ni comparables
