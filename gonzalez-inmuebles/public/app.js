@@ -28,7 +28,8 @@ function app() {
       coefCub: 1, coefSemi: 0.7, coefDesc: 0.33,
       dias: 120, honorarios: 3,
       ciudad: 'Ciudad Autónoma de Buenos Aires',
-      agente: 'Martín González', matricula: 'MN 524 · CPI'
+      agente: 'Martín González', matricula: 'MN 524 · CPI',
+      ocultarAltura: true, pasoAltura: 100
     },
     barrios: [],
 
@@ -52,7 +53,11 @@ function app() {
             '5 · Tu propiedad', '6 · Valuación', '7 · Estrategia'],
 
     /* ---------- Datos de la tasación ---------- */
-    prop: { dir: '', zona: '', tipo: '', cub: 0, semi: 0, desc: 0 },
+    prop: {
+      dir: '', zona: '', tipo: '', cub: 0, semi: 0, desc: 0,
+      cochera: false, cocheraDetalle: '',
+      verificada: false, dirVerificada: '', lat: '', lon: ''
+    },
     coef: { cub: 1, semi: 0.7, desc: 0.33 },
     comp: { similares: 0, fotos: 0, video: 0, tour: 0, min: 0, max: 0 },
     destacadas: [],
@@ -63,6 +68,9 @@ function app() {
     cond: { dias: 120, honorarios: 3, agente: 'Martín González', matricula: 'MN 524 · CPI' },
     zonaSel: '',
     mapaAbierto: false,
+    verificando: false,
+    resultadosDir: null,      // null = sin consultar; [] = sin coincidencias
+    motivoGeo: '',
 
     /* ============================================================
        ARRANQUE Y SESIÓN
@@ -211,13 +219,17 @@ function app() {
       this.idActual = null;
       this.estado = 'borrador';
       this.paso = 0;
-      this.prop = { dir: '', zona: '', tipo: '', cub: 0, semi: 0, desc: 0 };
+      this.prop = {
+        dir: '', zona: '', tipo: '', cub: 0, semi: 0, desc: 0,
+        cochera: false, cocheraDetalle: '',
+        verificada: false, dirVerificada: '', lat: '', lon: ''
+      };
       this.coef = { cub: n(this.params.coefCub, 1), semi: n(this.params.coefSemi, .7), desc: n(this.params.coefDesc, .33) };
       this.comp = { similares: 0, fotos: 0, video: 0, tour: 0, min: 0, max: 0 };
       this.destacadas = [
-        { rol: 'La más económica', destacar: false, foto: '', titulo: '', precio: 0, m2: 0, ambientes: 0, caracteristicas: '', url: '' },
-        { rol: 'La más cara',      destacar: false, foto: '', titulo: '', precio: 0, m2: 0, ambientes: 0, caracteristicas: '', url: '' },
-        { rol: 'La más parecida',  destacar: true,  foto: '', titulo: '', precio: 0, m2: 0, ambientes: 0, caracteristicas: '', url: '' }
+        { rol: 'La más económica', destacar: false, foto: '', titulo: '', precio: 0, m2: 0, ambientes: 0, cochera: false, caracteristicas: '', url: '' },
+        { rol: 'La más cara',      destacar: false, foto: '', titulo: '', precio: 0, m2: 0, ambientes: 0, cochera: false, caracteristicas: '', url: '' },
+        { rol: 'La más parecida',  destacar: true,  foto: '', titulo: '', precio: 0, m2: 0, ambientes: 0, cochera: false, caracteristicas: '', url: '' }
       ];
       this.comps = [];
       this.estrategia = { mes1: 0, mes2: 0, objetivo: 0 };
@@ -228,6 +240,8 @@ function app() {
       };
       this.zonaSel = '';
       this.mapaAbierto = false;
+      this.resultadosDir = null;
+      this.motivoGeo = '';
       if (conEjemplo) this.cargarDemo();
       this.pantalla = 'editor';
     },
@@ -240,6 +254,14 @@ function app() {
         ['prop', 'coef', 'comp', 'destacadas', 'comps', 'estrategia', 'mercado', 'cond']
           .forEach(k => { if (t[k]) this[k] = t[k]; });
         this.objetivoAuto = typeof t.objetivoAuto === 'boolean' ? t.objetivoAuto : true;
+        // Tasaciones guardadas antes de que existieran estos campos
+        this.prop = Object.assign(
+          { dir: '', zona: '', tipo: '', cub: 0, semi: 0, desc: 0,
+            cochera: false, cocheraDetalle: '', verificada: false, dirVerificada: '', lat: '', lon: '' },
+          this.prop);
+        this.destacadas = this.destacadas.map(d => Object.assign({ cochera: false }, d));
+        this.resultadosDir = null;
+        this.motivoGeo = '';
         this.zonaSel = this.barrioActual ? this.prop.zona : (this.prop.zona ? '__otro' : '');
         this.paso = 0;
         this.pantalla = 'editor';
@@ -398,11 +420,96 @@ function app() {
       return [this.prop.dir, this.prop.zona, this.params.ciudad].filter(Boolean).join(', ');
     },
     get urlMapa() {
+      // Con coordenadas verificadas se apunta al punto exacto; si no, se busca el texto
+      if (this.prop.lat && this.prop.lon) {
+        return 'https://www.google.com/maps/search/?api=1&query=' + this.prop.lat + ',' + this.prop.lon;
+      }
       return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(this.consultaMapa);
     },
     get urlMapaEmbed() {
-      return 'https://maps.google.com/maps?q=' + encodeURIComponent(this.consultaMapa) + '&z=16&output=embed';
+      const q = (this.prop.lat && this.prop.lon)
+        ? this.prop.lat + ',' + this.prop.lon
+        : this.consultaMapa;
+      return 'https://maps.google.com/maps?q=' + encodeURIComponent(q) + '&z=17&output=embed';
     },
+
+    /* ============================================================
+       DIRECCIÓN: VERIFICACIÓN Y PRIVACIDAD
+       ============================================================ */
+
+    // Cualquier cambio en el texto invalida la verificación anterior
+    alEditarDireccion() {
+      this.prop.verificada = false;
+      this.prop.dirVerificada = '';
+      this.prop.lat = '';
+      this.prop.lon = '';
+      this.resultadosDir = null;
+      this.motivoGeo = '';
+    },
+
+    async verificarDireccion() {
+      const consulta = this.consultaMapa;
+      if (consulta.length < 4) { this.avisar('Escribí primero la dirección.'); return; }
+      this.verificando = true;
+      this.motivoGeo = '';
+      try {
+        const r = await this.api('GET', '/api/geocodificar?q=' + encodeURIComponent(consulta));
+        if (!r.ok) {
+          this.resultadosDir = [];
+          this.motivoGeo = r.motivo || 'No se pudo consultar el servicio';
+        } else {
+          // Primero las coincidencias con altura exacta
+          this.resultadosDir = (r.resultados || []).sort((a, b) => (b.exacto ? 1 : 0) - (a.exacto ? 1 : 0));
+          this.mapaAbierto = true;
+          if (!this.resultadosDir.length) this.motivoGeo = 'Sin coincidencias para esa dirección';
+        }
+      } catch (e) {
+        this.resultadosDir = [];
+        this.motivoGeo = e.message;
+      } finally {
+        this.verificando = false;
+      }
+    },
+
+    confirmarDireccion(r) {
+      this.prop.verificada = true;
+      this.prop.dirVerificada = r.etiqueta;
+      this.prop.lat = r.lat;
+      this.prop.lon = r.lon;
+      // Si el barrio detectado está en la matriz y todavía no se eligió, se propone
+      if (r.barrio && !this.barrioActual) {
+        const b = this.barrios.find(x => (x.nombre || '').toLowerCase() === r.barrio.toLowerCase());
+        if (b) { this.zonaSel = b.nombre; this.elegirBarrio(); }
+      }
+      this.resultadosDir = null;
+      this.mapaAbierto = true;
+      this.avisar('Dirección verificada.');
+    },
+
+    // Altura redondeada hacia abajo para el informe: "Campana 3874" → "Campana al 3800"
+    direccionPublica(dir) {
+      const txt = String(dir || '').trim();
+      if (!this.params.ocultarAltura || !txt) return txt;
+      const paso = n(this.params.pasoAltura, 100) || 100;
+
+      // De todos los números del texto, la altura es el más grande (descarta piso y depto)
+      let mejor = null;
+      for (const m of txt.matchAll(/\d{2,6}/g)) {
+        if (!mejor || Number(m[0]) > Number(mejor[0])) mejor = m;
+      }
+      if (!mejor) return txt;
+
+      const altura = Number(mejor[0]);
+      const escalon = altura < paso ? 10 : paso;
+      const base = Math.floor(altura / escalon) * escalon;
+      const calle = txt.slice(0, mejor.index)
+        .replace(/[\s,·\-]*(n[º°o]\.?|nro\.?|núm(ero)?\.?|num(ero)?\.?)\s*$/i, '')  // "Calle 11 nº 2345"
+        .replace(/[\s,·\-]+$/, '')
+        .trim();
+      return calle ? calle + ' al ' + base : txt;
+    },
+
+    get dirPublica() { return this.direccionPublica(this.prop.dir); },
 
     /* ============================================================
        ASISTENTE
@@ -523,19 +630,24 @@ function app() {
     cargarDemo() {
       this.prop = { dir: 'Campana 3874', zona: 'Villa Devoto',
                     tipo: 'PH de 3 ambientes con terraza propia',
-                    cub: 67.77, semi: 4.93, desc: 66.51 };
+                    cub: 67.77, semi: 4.93, desc: 66.51,
+                    cochera: false, cocheraDetalle: '',
+                    verificada: false, dirVerificada: '', lat: '', lon: '' };
       this.zonaSel = 'Villa Devoto';
       this.elegirBarrio();
       this.comp = { similares: 38, fotos: 22, video: 7, tour: 3, min: 159000, max: 289000 };
       this.destacadas = [
         { rol: 'La más económica', destacar: false, foto: '', titulo: 'PH 2 ambientes a refaccionar',
           precio: 159000, m2: 61, ambientes: 2,
+          cochera: false,
           caracteristicas: 'Interno, sin luz natural directa, cocina y baño originales. Sin espacio exterior propio.', url: '' },
         { rol: 'La más cara', destacar: false, foto: '', titulo: 'PH 3 ambientes reciclado con terraza y parrilla',
           precio: 289000, m2: 96, ambientes: 3,
+          cochera: true,
           caracteristicas: 'Reciclado a nuevo, cocina integrada, terraza con parrilla y cochera.', url: '' },
         { rol: 'La más parecida', destacar: true, foto: '', titulo: 'PH 3 ambientes con terraza propia',
           precio: 214000, m2: 84, ambientes: 3,
+          cochera: false,
           caracteristicas: 'Superficie y distribución equivalentes, terraza propia, sin expensas, apto crédito.', url: '' }
       ];
       this.comps = [
@@ -584,6 +696,7 @@ function app() {
               ${d.m2 > 0 ? this.usd(d.precio / d.m2) + ' / m²' : '—'}
               ${d.m2 > 0 ? ' · ' + this.num(d.m2, 0) + ' m²' : ''}
               ${d.ambientes > 0 ? ' · ' + this.num(d.ambientes) + ' amb.' : ''}
+              ${d.cochera ? ' · Con cochera' : ' · Sin cochera'}
             </span><br><br>
             <span style="font-size:9pt;font-weight:bold">${t(d.titulo)}</span><br>
             <span style="font-size:8.5pt;color:#5A5A54">${t(d.caracteristicas)}</span>
@@ -595,7 +708,7 @@ function app() {
 <html xmlns:o="urn:schemas-microsoft-com:office:office"
       xmlns:w="urn:schemas-microsoft-com:office:word"
       xmlns="http://www.w3.org/TR/REC-html40">
-<head><meta charset="utf-8"><title>Tasación ${t(this.prop.dir)}</title>
+<head><meta charset="utf-8"><title>Tasación ${t(this.dirPublica)}</title>
 <style>
   @page WordSection1 { size:21cm 29.7cm; margin:2cm; }
   div.WordSection1 { page:WordSection1; }
@@ -693,7 +806,16 @@ function app() {
   ${salto}
 
   <p class="eyebrow">Carpeta de tasación</p>
-  <h1>${t(this.prop.dir)} · ${t(this.prop.zona)}</h1>
+  <h1>${t(this.dirPublica)} · ${t(this.prop.zona)}</h1>
+  <p style="margin:0 0 10pt">
+    ${this.prop.tipo ? `<span style="font-size:8.5pt;font-weight:bold;color:${V};background:${CR};padding:3pt 7pt">${t(this.prop.tipo)}</span>&nbsp;` : ''}
+    <span style="font-size:8.5pt;font-weight:bold;color:${V};background:${CR};padding:3pt 7pt">${this.num(this.supTotal, 0)} m² totales</span>&nbsp;
+    <span style="font-size:8.5pt;font-weight:bold;padding:3pt 7pt;${this.prop.cochera
+      ? `background:${V};color:#ffffff`
+      : `background:#ffffff;color:#5A5A54;border:1px solid #E3E0D6`}">
+      ${this.prop.cochera
+        ? '✓ Con cochera' + (this.prop.cocheraDetalle ? ' · ' + t(this.prop.cocheraDetalle) : '')
+        : '✕ Sin cochera'}</span></p>
 
   <table style="background:${V};margin-bottom:12pt"><tr><td style="padding:12pt;border-left:8pt solid ${D}">
     <p style="color:${D};font-size:8pt;letter-spacing:2pt;text-transform:uppercase;font-weight:bold;margin:0">En pocas palabras</p>
@@ -702,10 +824,12 @@ function app() {
       en ${t(this.prop.zona)} se ofrecen a un promedio de <b>${this.usd(this.promedioM2)} por metro</b>.
       Multiplicando una cosa por la otra, el valor estimado de mercado es de <b>${this.usd(this.valuacion)}</b>.
       Proponemos publicarla en <b>${this.usd(this.estrategia.mes1)}</b> y trabajar con un objetivo de cierre
-      de <b>${this.usd(this.objetivoCierre)}</b>.</p></td></tr></table>
+      de <b>${this.usd(this.objetivoCierre)}</b>.${this.prop.cochera
+        ? ' Suma cochera' + (this.prop.cocheraDetalle ? ' (' + t(this.prop.cocheraDetalle) + ')' : '') + ', un diferencial frente a buena parte de la oferta.'
+        : ''}</p></td></tr></table>
 
   <h3>1 · La propiedad y cómo se mide</h3>
-  <p>La tasación se realizó a partir de la visita a ${t(this.prop.dir)}
+  <p>La tasación se realizó a partir de la visita a ${t(this.dirPublica)}
      ${this.prop.tipo ? '(' + t(this.prop.tipo) + ')' : ''}, considerando superficies, distribución y
      estado, y comparándola con propiedades que hoy se ofrecen en ${t(this.prop.zona)}.</p>
   <p class="def"><b style="color:${V}">Superficie comparable</b> (u homogeneizada): un metro de patio o
@@ -802,7 +926,7 @@ function app() {
 
 </div></body></html>`;
 
-      const nombre = 'Tasacion_' + (this.prop.dir || 'Propiedad').replace(/[^\w]+/g, '_') + '.doc';
+      const nombre = 'Tasacion_' + (this.dirPublica || 'Propiedad').replace(/[^\w]+/g, '_') + '.doc';
       descargar('\ufeff' + doc, nombre, 'application/msword');
       this.avisar('Documento Word generado: ' + nombre);
     }
