@@ -193,20 +193,76 @@
           </p>
 
           <div class="field">
-            <label for="dir">Dirección</label>
-            <input id="dir" type="text" x-model="prop.dir" placeholder="Campana 3874">
-            <div style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem;flex-wrap:wrap" x-show="prop.dir">
-              <a class="chip-link" :href="urlMapa" target="_blank" rel="noopener">📍 Ver en Google Maps</a>
+            <label for="dir">
+              Dirección
+              <span class="verificado" x-show="prop.verificada">✓ verificada</span>
+            </label>
+            <div style="display:flex;gap:.5rem">
+              <input id="dir" type="text" x-model="prop.dir" @input="alEditarDireccion()"
+                     placeholder="Campana 3874" style="flex:1">
+              <button type="button" class="btn btn-linea" @click="verificarDireccion()"
+                      :disabled="verificando || !prop.dir"
+                      x-text="verificando ? 'Buscando…' : 'Verificar'"></button>
+            </div>
+
+            <!-- Resultados del geocodificador -->
+            <div class="geo" x-show="resultadosDir !== null">
+              <template x-if="resultadosDir && resultadosDir.length">
+                <div>
+                  <p class="geo-tit">¿Es alguna de estas?</p>
+                  <template x-for="(r, i) in resultadosDir" :key="i">
+                    <button type="button" class="geo-op" @click="confirmarDireccion(r)">
+                      <span class="ok" :class="r.exacto ? '' : 'aprox'" x-text="r.exacto ? '✓' : '≈'"></span>
+                      <span>
+                        <b x-text="r.etiqueta"></b>
+                        <em x-show="!r.exacto">sin altura exacta: la calle existe, la puerta no pudo confirmarse</em>
+                      </span>
+                    </button>
+                  </template>
+                </div>
+              </template>
+              <template x-if="resultadosDir && !resultadosDir.length">
+                <p class="geo-err">
+                  <span x-text="motivoGeo || 'Sin coincidencias'"></span>.
+                  Revisá la calle y la altura, o confirmala a ojo en Google Maps.
+                </p>
+              </template>
+            </div>
+
+            <div style="display:flex;gap:.5rem;align-items:center;margin-top:.6rem;flex-wrap:wrap" x-show="prop.dir">
+              <a class="chip-link" :href="urlMapa" target="_blank" rel="noopener">📍 Abrir en Google Maps</a>
               <button type="button" class="link-auto" @click="mapaAbierto = !mapaAbierto"
-                      x-text="mapaAbierto ? 'Ocultar mapa' : 'Previsualizar mapa'"></button>
+                      x-text="mapaAbierto ? 'Ocultar mapa' : 'Ver el mapa acá'"></button>
             </div>
             <template x-if="mapaAbierto && prop.dir">
               <iframe class="mapa" :src="urlMapaEmbed" loading="lazy"
                       referrerpolicy="no-referrer-when-downgrade" title="Ubicación de la propiedad"></iframe>
             </template>
+
+            <p class="hint" style="margin-top:.6rem" x-show="prop.dir">
+              En el informe va a figurar como <b x-text="dirPublica"></b>
+              <span x-show="params.ocultarAltura">, con la altura redondeada por privacidad</span>.
+              <button type="button" class="link-auto" @click="pantalla='config'">Cambiar</button>
+            </p>
           </div>
+
           <div class="field"><label for="tipo">Tipo de propiedad</label>
             <input id="tipo" type="text" x-model="prop.tipo" placeholder="PH de 3 ambientes con terraza propia"></div>
+
+          <div class="row row-2">
+            <div class="field">
+              <label for="coch">Cochera</label>
+              <select id="coch" x-model="prop.cochera">
+                <option :value="false">No tiene</option>
+                <option :value="true">Sí, tiene</option>
+              </select>
+            </div>
+            <div class="field" x-show="prop.cochera">
+              <label for="cochd">Detalle de la cochera</label>
+              <input id="cochd" type="text" x-model="prop.cocheraDetalle"
+                     placeholder="Fija, cubierta, para auto mediano">
+            </div>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -306,6 +362,11 @@
               <div class="field"><label :for="'da'+i">Amb.</label>
                 <input :id="'da'+i" type="number" min="0" x-model.number="d.ambientes"></div>
             </div>
+            <div class="field"><label :for="'dk'+i">Cochera</label>
+              <select :id="'dk'+i" x-model="d.cochera">
+                <option :value="false">No tiene</option>
+                <option :value="true">Sí, tiene</option>
+              </select></div>
             <div class="field"><label :for="'dc'+i">Características</label>
               <textarea :id="'dc'+i" x-model="d.caracteristicas"
                         placeholder="Patio, terraza, apto crédito, sin expensas..."></textarea></div>
@@ -556,10 +617,40 @@
           <div class="field"><label for="phon">Honorarios</label>
             <div class="unit"><input id="phon" type="number" step="0.1" min="0" x-model.number="params.honorarios"><span>%</span></div></div>
         </div>
-        <div class="field"><label for="pciu">Ciudad para el mapa</label>
+        <div class="field"><label for="pciu">Ciudad para el mapa y la verificación</label>
           <input id="pciu" type="text" x-model="params.ciudad" placeholder="Ciudad Autónoma de Buenos Aires"></div>
         <button type="button" class="btn btn-linea" style="width:100%;justify-content:center"
                 @click="aplicarDefaults()">Aplicar a la tasación actual</button>
+      </fieldset>
+
+      <!-- Privacidad -->
+      <fieldset>
+        <legend>Privacidad de la dirección</legend>
+        <p class="hint">
+          El informe se comparte y circula. La altura exacta queda sólo en el sistema:
+          en las hojas se muestra redondeada hacia abajo, así la propiedad se ubica en la cuadra
+          sin quedar identificada puerta por puerta.
+        </p>
+        <div class="row row-2">
+          <div class="field">
+            <label for="poculta">En el informe</label>
+            <select id="poculta" x-model="params.ocultarAltura">
+              <option :value="true">Redondear la altura</option>
+              <option :value="false">Mostrar la dirección completa</option>
+            </select>
+          </div>
+          <div class="field" x-show="params.ocultarAltura">
+            <label for="ppaso">Redondear cada</label>
+            <div class="unit">
+              <input id="ppaso" type="number" step="50" min="10" x-model.number="params.pasoAltura">
+              <span>nros.</span>
+            </div>
+          </div>
+        </div>
+        <p class="hint">
+          Ejemplo: <b>Campana 3874</b> se publica como
+          <b x-text="direccionPublica('Campana 3874')"></b>.
+        </p>
       </fieldset>
 
       <!-- Copia de seguridad -->
@@ -592,7 +683,7 @@
   <div class="cabecera no-print">
     <button type="button" class="btn btn-plano" @click="cerrarVisor()">← Volver a editar</button>
     <div class="tit">
-      <span x-text="prop.dir || 'Tasación'"></span>
+      <span x-text="dirPublica || 'Tasación'"></span>
       <small x-text="prop.zona"></small>
     </div>
     <div class="zoomctl">
@@ -810,6 +901,7 @@
                 <div class="specs">
                   <span x-show="d.m2 > 0" x-text="num(d.m2,0) + ' m²'"></span>
                   <span x-show="d.ambientes > 0" x-text="num(d.ambientes) + ' amb.'"></span>
+                  <span :class="d.cochera ? 'cok' : ''" x-text="d.cochera ? 'Con cochera' : 'Sin cochera'"></span>
                 </div>
                 <div class="ti" x-text="d.titulo"></div>
                 <div class="ca" x-text="d.caracteristicas"></div>
@@ -827,7 +919,7 @@
           no la explica solo el metraje: la explican el estado, la orientación, los espacios
           exteriores y —muy especialmente— cómo está presentada la publicación.
           La referencia más parecida a
-          <b><span x-text="prop.dir || 'tu propiedad'"></span></b> es el punto de partida honesto
+          <b><span x-text="dirPublica || 'tu propiedad'"></span></b> es el punto de partida honesto
           para fijar el precio de salida.
         </div>
 
@@ -839,12 +931,23 @@
         <div class="headline">
           <p class="eyebrow">Carpeta de tasación</p>
           <h1 class="h-doc">
-            <span x-text="prop.dir || 'Dirección de la propiedad'"></span>
+            <span x-text="dirPublica || 'Dirección de la propiedad'"></span>
             <span style="color:var(--dorado)" x-show="prop.zona"> · <span x-text="prop.zona"></span></span>
           </h1>
           <p class="p-doc" style="margin:2mm 0 0;font-size:8.5pt;color:var(--tinta-suave)">
             Análisis de mercado · Comparables · Estrategia de comercialización
           </p>
+
+          <!-- Datos que el comprador mira primero -->
+          <div class="chips">
+            <span class="chip" x-show="prop.tipo" x-text="prop.tipo"></span>
+            <span class="chip" x-text="num(supTotal,0) + ' m² totales'"></span>
+            <span class="chip" :class="prop.cochera ? 'si' : 'no'">
+              <span x-text="prop.cochera ? '✓' : '✕'"></span>
+              <span x-text="prop.cochera ? 'Con cochera' : 'Sin cochera'"></span>
+              <em x-show="prop.cochera && prop.cocheraDetalle" x-text="'· ' + prop.cocheraDetalle"></em>
+            </span>
+          </div>
         </div>
 
         <!-- Resumen en lenguaje llano -->
@@ -864,9 +967,14 @@
         <h3 class="h-sec"><span class="num">1</span> La propiedad y cómo se mide</h3>
         <p class="p-doc">
           La tasación se realizó a partir de la visita a
-          <b x-text="prop.dir || 'la propiedad'"></b><span x-text="prop.tipo ? ' (' + prop.tipo + ')' : ''"></span>,
+          <b x-text="dirPublica || 'la propiedad'"></b><span x-text="prop.tipo ? ' (' + prop.tipo + ')' : ''"></span>,
           considerando sus superficies, su distribución y su estado, y comparándola con propiedades
           que hoy se ofrecen en <span x-text="prop.zona || 'la zona'"></span>.
+          <template x-if="prop.cochera">
+            <span>Cuenta además con <b>cochera<span x-show="prop.cocheraDetalle"
+              x-text="' ' + prop.cocheraDetalle"></span></b>, un diferencial frente a buena parte
+              de la oferta del segmento.</span>
+          </template>
         </p>
 
         <div class="dfn">
@@ -990,7 +1098,7 @@
 
       <!-- ---------- HOJA 6 · Estrategia, cierre y condiciones ---------- -->
       <article class="page" id="hoja6">
-        <p class="eyebrow"><span x-text="prop.dir"></span><span x-show="prop.zona"> · <span x-text="prop.zona"></span></span></p>
+        <p class="eyebrow"><span x-text="dirPublica"></span><span x-show="prop.zona"> · <span x-text="prop.zona"></span></span></p>
 
         <h3 class="h-sec" style="margin-top:4mm"><span class="num">3</span> Estrategia comercial de publicación</h3>
         <div class="strategy">
